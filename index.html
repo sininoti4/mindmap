@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>マインドマップ</title>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Helvetica Neue', sans-serif; background: #f5f5f3; display: flex; align-items: center; justify-content: center; min-height: 100vh; padding: 16px; }
+#app { display: flex; flex-direction: column; width: 100%; max-width: 960px; height: 680px; border: 1px solid #ddd; border-radius: 14px; overflow: hidden; background: #fff; box-shadow: 0 4px 24px rgba(0,0,0,0.08); }
+#toolbar { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid #eee; background: #fafaf8; flex-shrink: 0; flex-wrap: wrap; }
+#toolbar-label { font-size: 13px; font-weight: 600; color: #555; margin-right: 4px; }
+.tb-btn { font-size: 12px; padding: 5px 13px; border-radius: 8px; border: 1px solid #ddd; background: #fff; color: #333; cursor: pointer; white-space: nowrap; transition: background 0.15s; }
+.tb-btn:hover { background: #f0f0ee; }
+.tb-btn.danger { border-color: #E24B4A; color: #E24B4A; }
+.tb-btn.danger:hover { background: #fff0f0; }
+#hint { font-size: 11px; color: #aaa; margin-left: auto; }
+#canvas { flex: 1; position: relative; overflow: hidden; cursor: grab; user-select: none; background: #fefefe; }
+#canvas.grabbing { cursor: grabbing; }
+svg#connections { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; overflow: visible; }
+.node {
+  position: absolute; border-radius: 20px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; font-size: 13px; font-weight: 500;
+  text-align: center; word-break: break-word; line-height: 1.4;
+  border: 2px solid transparent;
+  transition: box-shadow 0.2s, border-color 0.2s, background 0.3s, color 0.3s;
+  animation: nodeIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) both;
+}
+@keyframes nodeIn {
+  from { opacity: 0; transform: scale(0.4); }
+  to   { opacity: 1; transform: scale(1); }
+}
+.node:hover { filter: brightness(1.05); }
+.node.selected { box-shadow: 0 0 0 3px rgba(55,138,221,0.3); }
+.node.root { font-size: 15px; border-radius: 28px; }
+.node.pulse { animation: pulse 0.4s ease; }
+@keyframes pulse {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+.node input { border: none; outline: none; background: transparent; font-size: inherit; font-weight: inherit; font-family: inherit; color: inherit; text-align: center; width: 100%; padding: 0 4px; }
+#ctx-menu { position: absolute; background: #fff; border: 1px solid #e5e5e5; border-radius: 10px; z-index: 300; overflow: hidden; min-width: 164px; box-shadow: 0 4px 16px rgba(0,0,0,0.1); animation: fadeUp 0.15s ease both; }
+@keyframes fadeUp { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+.ctx-item { padding: 8px 14px; font-size: 13px; color: #333; cursor: pointer; display: flex; align-items: center; gap: 8px; }
+.ctx-item:hover { background: #f5f5f3; }
+.ctx-item.red { color: #E24B4A; }
+.ctx-sep { height: 1px; background: #eee; margin: 4px 0; }
+.color-row { display: flex; align-items: center; gap: 6px; padding: 8px 14px; }
+.color-dot { width: 18px; height: 18px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; transition: transform 0.15s, border-color 0.15s; flex-shrink: 0; }
+.color-dot:hover { transform: scale(1.3); }
+.color-dot.active { border-color: #333; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="toolbar">
+    <span id="toolbar-label">🧠 マインドマップ</span>
+    <button class="tb-btn" id="btn-add">＋ 子ノード</button>
+    <button class="tb-btn" id="btn-reset">リセット</button>
+    <button class="tb-btn danger" id="btn-delete">削除</button>
+    <span id="hint">クリック選択 · ダブルクリック編集 · 右クリックでカラー変更</span>
+  </div>
+  <div id="canvas">
+    <svg id="connections"></svg>
+  </div>
+</div>
+<div id="ctx-menu" style="display:none;"></div>
+
+<script>
+const canvas = document.getElementById('canvas');
+const svgEl = document.getElementById('connections');
+const ctxMenu = document.getElementById('ctx-menu');
+
+const PALETTES = [
+  { bg:'#E6F1FB', text:'#0C447C', border:'#378ADD' },
+  { bg:'#E1F5EE', text:'#085041', border:'#1D9E75' },
+  { bg:'#FAEEDA', text:'#633806', border:'#BA7517' },
+  { bg:'#FBEAF0', text:'#72243E', border:'#D4537E' },
+  { bg:'#EEEDFE', text:'#3C3489', border:'#7F77DD' },
+  { bg:'#FAECE7', text:'#712B13', border:'#D85A30' },
+  { bg:'#EAF3DE', text:'#27500A', border:'#639922' },
+  { bg:'#F1EFE8', text:'#444441', border:'#888780' },
+];
+
+let nodes = [], edges = [], selected = null, idCtr = 0;
+let isPanning = false, panStart = {x:0,y:0};
+let dragNode = null, dragStart = {x:0,y:0};
+let editingId = null;
+
+function mkNode(text, x, y, parentId=null, ci=0) {
+  const id = ++idCtr;
+  const n = { id, text, x, y, parentId, ci, el: null };
+  nodes.push(n);
+  if (parentId !== null) edges.push({from: parentId, to: id});
+  renderNode(n);
+  updateEdges();
+  return n;
+}
+
+function applyColor(el, ci, isRoot) {
+  const c = PALETTES[ci % PALETTES.length];
+  const w = isRoot ? 130 : 106;
+  el.style.background = c.bg;
+  el.style.color = c.text;
+  el.style.borderColor = c.border;
+  el.style.width = w + 'px';
+}
+
+function renderNode(n) {
+  const isRoot = n.parentId === null;
+  const el = document.createElement('div');
+  el.className = 'node' + (isRoot ? ' root' : '');
+  el.dataset.id = n.id;
+  const h = isRoot ? 44 : 36;
+  const w = isRoot ? 130 : 106;
+  el.style.cssText = `left:${n.x-w/2}px;top:${n.y-h/2}px;min-height:${h}px;padding:6px 14px;`;
+  applyColor(el, n.ci, isRoot);
+  el.textContent = n.text;
+  el.addEventListener('mousedown', e => {
+    e.stopPropagation();
+    if (editingId === n.id) return;
+    selectNode(n.id);
+    dragNode = n;
+    dragStart = { x: e.clientX - n.x, y: e.clientY - n.y };
+  });
+  el.addEventListener('dblclick', e => { e.stopPropagation(); startEdit(n); });
+  canvas.appendChild(el);
+  n.el = el;
+}
+
+function selectNode(id) {
+  nodes.forEach(n => n.el && n.el.classList.remove('selected'));
+  selected = id;
+  if (id !== null) {
+    const n = nodes.find(x => x.id === id);
+    if (n && n.el) n.el.classList.add('selected');
+  }
+}
+
+function startEdit(n) {
+  if (editingId !== null) stopEdit();
+  editingId = n.id;
+  n.el.textContent = '';
+  const inp = document.createElement('input');
+  inp.value = n.text;
+  inp.style.fontSize = n.parentId === null ? '15px' : '13px';
+  n.el.appendChild(inp);
+  inp.focus(); inp.select();
+  inp.addEventListener('keydown', e => { if (e.key==='Enter'||e.key==='Escape') stopEdit(); });
+  inp.addEventListener('blur', stopEdit);
+}
+
+function stopEdit() {
+  if (editingId === null) return;
+  const n = nodes.find(x => x.id === editingId);
+  editingId = null;
+  if (!n) return;
+  const inp = n.el.querySelector('input');
+  if (inp) n.text = inp.value || n.text;
+  n.el.textContent = n.text;
+}
+
+function changeColor(id, ci) {
+  const n = nodes.find(x => x.id === id);
+  if (!n) return;
+  n.ci = ci;
+  applyColor(n.el, ci, n.parentId === null);
+  n.el.classList.remove('pulse');
+  void n.el.offsetWidth;
+  n.el.classList.add('pulse');
+  updateEdges();
+}
+
+function deleteNode(id) {
+  const toDelete = new Set();
+  function collect(nid) { toDelete.add(nid); nodes.filter(n=>n.parentId===nid).forEach(n=>collect(n.id)); }
+  collect(id);
+  toDelete.forEach(nid => { const n = nodes.find(x=>x.id===nid); if(n&&n.el) n.el.remove(); });
+  nodes = nodes.filter(n => !toDelete.has(n.id));
+  edges = edges.filter(e => !toDelete.has(e.from) && !toDelete.has(e.to));
+  selected = null;
+  updateEdges();
+}
+
+function addChild() {
+  if (selected === null) return;
+  const parent = nodes.find(n => n.id === selected);
+  if (!parent) return;
+  const children = nodes.filter(n => n.parentId === selected);
+  const spread = Math.PI / 3;
+  const baseAngle = children.length * 0.6 - spread * (children.length > 0 ? 0.5 : 0);
+  const angle = baseAngle + (children.length % 2 === 0 ? -1 : 1) * spread * Math.ceil(children.length / 2);
+  const dist = 155;
+  const cx2 = parent.x + Math.cos(angle) * dist;
+  const cy2 = parent.y + Math.sin(angle) * dist;
+  const newNode = mkNode('アイデア', cx2, cy2, selected, (parent.ci + children.length + 1) % PALETTES.length);
+  selectNode(newNode.id);
+  setTimeout(() => startEdit(newNode), 60);
+}
+
+function updateEdges() {
+  svgEl.innerHTML = '';
+  edges.forEach(e => {
+    const from = nodes.find(n=>n.id===e.from);
+    const to = nodes.find(n=>n.id===e.to);
+    if (!from || !to) return;
+    const c = PALETTES[to.ci % PALETTES.length];
+    const path = document.createElementNS('http://www.w3.org/2000/svg','path');
+    const dx = to.x - from.x, dy = to.y - from.y;
+    path.setAttribute('d', `M${from.x},${from.y} C${from.x+dx*0.5},${from.y} ${to.x-dx*0.5},${to.y} ${to.x},${to.y}`);
+    path.setAttribute('stroke', c.border);
+    path.setAttribute('stroke-width', '2.5');
+    path.setAttribute('fill', 'none');
+    path.setAttribute('stroke-linecap', 'round');
+    path.setAttribute('opacity', '0.65');
+    svgEl.appendChild(path);
+  });
+}
+
+function reposition() {
+  nodes.forEach(n => {
+    if (!n.el) return;
+    const isRoot = n.parentId === null;
+    const w = isRoot ? 130 : 106;
+    const h = isRoot ? 44 : 36;
+    n.el.style.left = (n.x - w/2) + 'px';
+    n.el.style.top = (n.y - h/2) + 'px';
+  });
+  updateEdges();
+}
+
+canvas.addEventListener('mousedown', e => {
+  if (e.target === canvas || e.target === svgEl) {
+    isPanning = true;
+    panStart = { x: e.clientX, y: e.clientY };
+    canvas.classList.add('grabbing');
+    hideCtx();
+    if (editingId !== null) stopEdit();
+    selectNode(null);
+  }
+});
+
+window.addEventListener('mousemove', e => {
+  if (dragNode) {
+    dragNode.x = e.clientX - dragStart.x;
+    dragNode.y = e.clientY - dragStart.y;
+    reposition();
+  } else if (isPanning) {
+    const dx = e.clientX - panStart.x, dy = e.clientY - panStart.y;
+    panStart = { x: e.clientX, y: e.clientY };
+    nodes.forEach(n => { n.x += dx; n.y += dy; });
+    reposition();
+  }
+});
+
+window.addEventListener('mouseup', () => {
+  dragNode = null; isPanning = false;
+  canvas.classList.remove('grabbing');
+});
+
+canvas.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const nodeEl = e.target.closest('.node');
+  if (!nodeEl) return;
+  const id = parseInt(nodeEl.dataset.id);
+  selectNode(id);
+  showCtx(e.clientX, e.clientY, id);
+});
+
+canvas.addEventListener('click', () => hideCtx());
+
+function showCtx(x, y, nodeId) {
+  const node = nodes.find(n => n.id === nodeId);
+  ctxMenu.innerHTML = '';
+
+  const addItem = (label, action, cls='') => {
+    const div = document.createElement('div');
+    div.className = 'ctx-item' + (cls ? ' '+cls : '');
+    div.textContent = label;
+    div.addEventListener('click', () => { hideCtx(); action(); });
+    ctxMenu.appendChild(div);
+  };
+
+  addItem('＋ 子ノードを追加', () => { selectNode(nodeId); addChild(); });
+  addItem('✏ 編集', () => { selectNode(nodeId); startEdit(node); });
+
+  const sep = document.createElement('div'); sep.className='ctx-sep'; ctxMenu.appendChild(sep);
+
+  const colorLabel = document.createElement('div');
+  colorLabel.style.cssText = 'padding:4px 14px 2px;font-size:11px;color:#aaa;';
+  colorLabel.textContent = 'カラー変更';
+  ctxMenu.appendChild(colorLabel);
+
+  const row = document.createElement('div'); row.className = 'color-row';
+  PALETTES.forEach((p, i) => {
+    const dot = document.createElement('div');
+    dot.className = 'color-dot' + (node.ci === i ? ' active' : '');
+    dot.style.background = p.border;
+    dot.title = `カラー ${i+1}`;
+    dot.addEventListener('click', e => { e.stopPropagation(); changeColor(nodeId, i); hideCtx(); });
+    row.appendChild(dot);
+  });
+  ctxMenu.appendChild(row);
+
+  if (node.parentId !== null) {
+    const sep2 = document.createElement('div'); sep2.className='ctx-sep'; ctxMenu.appendChild(sep2);
+    addItem('🗑 削除', () => deleteNode(nodeId), 'red');
+  }
+
+  ctxMenu.style.left = x + 'px';
+  ctxMenu.style.top = y + 'px';
+  ctxMenu.style.display = 'block';
+  document.body.appendChild(ctxMenu);
+}
+
+function hideCtx() { ctxMenu.style.display = 'none'; }
+
+document.getElementById('btn-add').addEventListener('click', addChild);
+document.getElementById('btn-delete').addEventListener('click', () => {
+  if (selected !== null) {
+    const n = nodes.find(x => x.id === selected);
+    if (n && n.parentId !== null) deleteNode(selected);
+  }
+});
+document.getElementById('btn-reset').addEventListener('click', () => {
+  nodes.forEach(n => { if(n.el) n.el.remove(); });
+  nodes=[]; edges=[]; idCtr=0; selected=null; svgEl.innerHTML='';
+  init();
+});
+
+function init() {
+  const rect = canvas.getBoundingClientRect();
+  const cx = rect.width ? rect.width/2 : 480;
+  const cy = rect.height ? rect.height/2 : 300;
+  const root = mkNode('中心テーマ', cx, cy, null, 0);
+  const branches = [
+    { text:'アイデア１', a:-135 },
+    { text:'アイデア２', a:-45 },
+    { text:'アイデア３', a:45 },
+    { text:'アイデア４', a:135 },
+  ];
+  branches.forEach((b, i) => {
+    const rad = b.a * Math.PI / 180;
+    const bx = cx + Math.cos(rad) * 170;
+    const by = cy + Math.sin(rad) * 120;
+    mkNode(b.text, bx, by, root.id, i+1);
+  });
+}
+
+window.addEventListener('load', init);
+</script>
+</body>
+</html>
