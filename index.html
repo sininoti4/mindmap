@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>マインドマップ</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%23185FA5'/%3E%3Crect x='12' y='4' width='8' height='6' rx='2' fill='white'/%3E%3Crect x='3' y='18' width='8' height='6' rx='2' fill='white'/%3E%3Crect x='21' y='18' width='8' height='6' rx='2' fill='white'/%3E%3Cline x1='16' y1='10' x2='16' y2='14' stroke='white' stroke-width='1.4'/%3E%3Cline x1='16' y1='14' x2='7' y2='18' stroke='white' stroke-width='1.4'/%3E%3Cline x1='16' y1='14' x2='25' y2='18' stroke='white' stroke-width='1.4'/%3E%3C/svg%3E">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 100%; height: 100%; overflow: hidden; background: #f5f4f0; font-family: -apple-system, 'Hiragino Sans', 'Yu Gothic UI', sans-serif; }
+
+#app { width: 100vw; height: 100vh; position: relative; background: #f5f4f0; overflow: hidden; user-select: none; }
+svg#mm { width: 100%; height: 100%; position: absolute; top: 0; left: 0; }
+
+#toolbar {
+  position: absolute; top: 14px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 4px;
+  background: #fff; border: 0.5px solid rgba(0,0,0,0.12);
+  border-radius: 12px; padding: 5px 8px; z-index: 20;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+}
+.tb-btn {
+  display: flex; align-items: center; gap: 5px;
+  font-size: 12px; padding: 5px 10px;
+  border: 0.5px solid rgba(0,0,0,0.15); border-radius: 8px;
+  background: transparent; color: #555; cursor: pointer; white-space: nowrap;
+  transition: background .12s;
+}
+.tb-btn:hover { background: #f1f0ec; }
+.tb-btn svg { flex-shrink: 0; }
+.tb-sep { width: 0.5px; height: 20px; background: rgba(0,0,0,0.1); margin: 0 2px; }
+
+#color-picker-wrap {
+  position: absolute; z-index: 40;
+  background: #fff; border: 0.5px solid rgba(0,0,0,0.15);
+  border-radius: 12px; padding: 10px; display: none;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.12);
+}
+#color-picker-wrap .cp-title { font-size: 11px; color: #999; margin-bottom: 7px; }
+#color-picker-wrap .cp-swatches { display: flex; flex-wrap: wrap; gap: 6px; width: 144px; }
+.cp-swatch { width: 24px; height: 24px; border-radius: 50%; cursor: pointer; border: 2px solid transparent; transition: transform .1s; }
+.cp-swatch:hover { transform: scale(1.15); }
+.cp-swatch.active { border-color: #222; }
+
+.hint {
+  position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%);
+  font-size: 11px; color: #999; background: #fff;
+  border: 0.5px solid rgba(0,0,0,0.1); border-radius: 999px;
+  padding: 4px 14px; white-space: nowrap; pointer-events: none; z-index: 5;
+}
+#edit-overlay { position: absolute; z-index: 30; display: none; }
+#edit-overlay input {
+  border: none; outline: none; background: transparent;
+  font-weight: 500; text-align: center;
+  font-family: inherit; padding: 0; margin: 0;
+  width: 100%; height: 100%; display: block;
+}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="toolbar">
+    <button class="tb-btn" id="btn-add-child">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="5" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="8" y="1" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="8" y="9" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M6 7h1.5M10.5 3v8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      子ノード
+    </button>
+    <button class="tb-btn" id="btn-add-sibling">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect x="1" y="5" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><rect x="8" y="5" width="5" height="4" rx="1" stroke="currentColor" stroke-width="1.2"/><path d="M6 7h2" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
+      兄弟ノード
+    </button>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" id="btn-color">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="7" cy="7" r="5.5" stroke="currentColor" stroke-width="1.2"/><path d="M7 1.5v11M1.5 7h11M3 3l8 8M11 3l-8 8" stroke="currentColor" stroke-width="1" stroke-linecap="round" opacity=".4"/><circle cx="7" cy="7" r="2" fill="currentColor" opacity=".6"/></svg>
+      色変更
+    </button>
+    <div class="tb-sep"></div>
+    <button class="tb-btn" id="btn-delete">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2.5 4h9M5.5 4V2.5h3V4M6 6.5v4M8 6.5v4M3.5 4l.5 7.5h6L11 4" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      削除
+    </button>
+    <button class="tb-btn" id="btn-reset">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M2 7a5 5 0 1 0 1.5-3.5L2 2v3h3" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      リセット
+    </button>
+  </div>
+
+  <div id="color-picker-wrap">
+    <div class="cp-title">ノードの色</div>
+    <div class="cp-swatches" id="cp-swatches"></div>
+  </div>
+
+  <svg id="mm" xmlns="http://www.w3.org/2000/svg">
+    <g id="edges"></g>
+    <g id="nodes"></g>
+  </svg>
+  <div id="edit-overlay"><input id="edit-input" type="text" /></div>
+  <div class="hint">ダブルクリック: 編集 | Tab: 子 | Enter: 兄弟 | C: 色変更 | Del: 削除 | ドラッグ: 移動 | ホイール: ズーム</div>
+</div>
+
+<script>
+const PALETTES = [
+  { main:'#534AB7', light:'#EEEDFE' },
+  { main:'#0F6E56', light:'#E1F5EE' },
+  { main:'#993C1D', light:'#FAECE7' },
+  { main:'#185FA5', light:'#E6F1FB' },
+  { main:'#3B6D11', light:'#EAF3DE' },
+  { main:'#854F0B', light:'#FAEEDA' },
+  { main:'#993556', light:'#FBEAF0' },
+  { main:'#888780', light:'#F1EFE8' },
+  { main:'#E24B4A', light:'#FCEBEB' },
+  { main:'#1D9E75', light:'#D6F5EC' },
+];
+
+let nodes=[], edges=[], selectedId=null, editingId=null, idCounter=0;
+let offset={x:0,y:0}, scale=1;
+let colorPickerOpen=false;
+
+const svg     = document.getElementById('mm');
+const overlay = document.getElementById('edit-overlay');
+const editInp = document.getElementById('edit-input');
+const cpWrap  = document.getElementById('color-picker-wrap');
+const mcv     = document.createElement('canvas');
+const mctx2   = mcv.getContext('2d');
+
+const swatchesEl = document.getElementById('cp-swatches');
+PALETTES.forEach((p,i) => {
+  const s = document.createElement('div');
+  s.className = 'cp-swatch';
+  s.style.background = p.main;
+  s.dataset.idx = i;
+  s.addEventListener('mousedown', ev => {
+    ev.stopPropagation();
+    if (selectedId !== null) {
+      const node = nodes.find(n=>n.id===selectedId);
+      if (node) { node.paletteIdx = i; render(); }
+    }
+    updateSwatchActive();
+  });
+  swatchesEl.appendChild(s);
+});
+
+function updateSwatchActive() {
+  const node = selectedId ? nodes.find(n=>n.id===selectedId) : null;
+  const idx = node ? (node.paletteIdx ?? defaultPalIdx(node.id)) : -1;
+  document.querySelectorAll('.cp-swatch').forEach(s => {
+    s.classList.toggle('active', parseInt(s.dataset.idx)===idx);
+  });
+}
+
+function measureText(label, fs) { mctx2.font=`500 ${fs}px sans-serif`; return mctx2.measureText(label).width; }
+function nodeWidth(label, isRoot) {
+  const fs=isRoot?14:13;
+  return Math.max(isRoot?110:80, measureText(label,fs)+(isRoot?40:30));
+}
+const nodeH = 34;
+
+function uid() { return ++idCounter; }
+function depth(id) { let d=0,c=id; while(true){const e=edges.find(e=>e.to===c);if(!e)break;c=e.from;d++;}return d; }
+function defaultPalIdx(id) { return depth(id)%PALETTES.length; }
+function palOf(node) { return PALETTES[node.paletteIdx??defaultPalIdx(node.id)]; }
+function parentOf(id) { const e=edges.find(e=>e.to===id); return e?e.from:null; }
+function childrenOf(id) { return edges.filter(e=>e.from===id).map(e=>e.to); }
+
+function svgToScreen(nx,ny) {
+  const r=svg.getBoundingClientRect();
+  return {x:nx*scale+offset.x+r.left, y:ny*scale+offset.y+r.top};
+}
+
+function init() {
+  idCounter=0; nodes=[]; edges=[]; selectedId=null; offset={x:window.innerWidth/2-80,y:window.innerHeight/2-17}; scale=1;
+  stopEdit(true); closeColorPicker();
+  nodes.push({id:uid(), label:'マインドマップ', x:80, y:17});
+  selectedId=nodes[0].id; render();
+}
+
+function addChild(parentId) {
+  const parent=nodes.find(n=>n.id===parentId); if(!parent) return;
+  const siblings=childrenOf(parentId), idx=siblings.length;
+  const angle=idx===0?0:(idx%2===0?1:-1)*(Math.PI/5*Math.ceil(idx/2));
+  const dist=depth(parentId)===0?180:150;
+  const node={id:uid(), label:'新しいノード',
+    x:parent.x+Math.cos(angle)*dist+(Math.random()-.5)*20,
+    y:parent.y+Math.sin(angle)*dist+(Math.random()-.5)*20};
+  nodes.push(node); edges.push({from:parentId,to:node.id});
+  selectedId=node.id; render(); startEdit(node.id);
+}
+function addSibling(id) { addChild(parentOf(id)??id); }
+
+function deleteNode(id) {
+  function collect(nid){let r=[nid];childrenOf(nid).forEach(c=>r=r.concat(collect(c)));return r;}
+  const del=collect(id), p=parentOf(id);
+  nodes=nodes.filter(n=>!del.includes(n.id));
+  edges=edges.filter(e=>!del.includes(e.from)&&!del.includes(e.to));
+  selectedId=p!==null?p:(nodes[0]?nodes[0].id:null);
+  closeColorPicker(); render();
+}
+
+function openColorPicker() {
+  if (!selectedId) return;
+  const node=nodes.find(n=>n.id===selectedId); if(!node) return;
+  const sp=svgToScreen(node.x,node.y);
+  const ar=document.getElementById('app').getBoundingClientRect();
+  cpWrap.style.left=Math.min(sp.x-72-ar.left, ar.width-160)+'px';
+  cpWrap.style.top=(sp.y-nodeH*scale/2-ar.top-90)+'px';
+  cpWrap.style.display='block';
+  colorPickerOpen=true; updateSwatchActive();
+}
+function closeColorPicker() { cpWrap.style.display='none'; colorPickerOpen=false; }
+function toggleColorPicker() { colorPickerOpen?closeColorPicker():openColorPicker(); }
+
+function startEdit(id) {
+  const node=nodes.find(n=>n.id===id); if(!node) return;
+  editingId=id; closeColorPicker();
+  const isRoot=parentOf(id)===null;
+  const w=nodeWidth(node.label,isRoot)*scale, h=nodeH*scale;
+  const sp=svgToScreen(node.x,node.y);
+  const ar=document.getElementById('app').getBoundingClientRect();
+  overlay.style.left=(sp.x-w/2-ar.left)+'px';
+  overlay.style.top=(sp.y-h/2-ar.top)+'px';
+  overlay.style.width=w+'px'; overlay.style.height=h+'px';
+  overlay.style.display='block';
+  editInp.value=node.label;
+  editInp.style.fontSize=(isRoot?14:13)*scale+'px';
+  editInp.style.color=palOf(node).main;
+  editInp.focus(); editInp.select();
+  render();
+}
+function stopEdit(force) {
+  if(!force&&editingId!==null){
+    const node=nodes.find(n=>n.id===editingId);
+    if(node&&editInp.value.trim()) node.label=editInp.value.trim();
+  }
+  editingId=null; overlay.style.display='none'; render();
+}
+
+editInp.addEventListener('input', ()=>{
+  const node=nodes.find(n=>n.id===editingId); if(!node) return;
+  node.label=editInp.value||'　';
+  const isRoot=parentOf(editingId)===null;
+  const w=nodeWidth(node.label,isRoot)*scale;
+  const sp=svgToScreen(node.x,node.y);
+  const ar=document.getElementById('app').getBoundingClientRect();
+  overlay.style.left=(sp.x-w/2-ar.left)+'px';
+  overlay.style.width=w+'px'; render();
+});
+editInp.addEventListener('keydown', ev=>{
+  if(ev.key==='Enter'){ev.preventDefault();stopEdit(false);}
+  if(ev.key==='Escape') stopEdit(true);
+  ev.stopPropagation();
+});
+editInp.addEventListener('blur', ()=>{ if(editingId!==null) stopEdit(false); });
+
+function render() {
+  document.getElementById('edges').innerHTML='';
+  document.getElementById('nodes').innerHTML='';
+  const tr=`translate(${offset.x},${offset.y}) scale(${scale})`;
+  document.getElementById('edges').setAttribute('transform',tr);
+  document.getElementById('nodes').setAttribute('transform',tr);
+
+  edges.forEach(e=>{
+    const f=nodes.find(n=>n.id===e.from),t=nodes.find(n=>n.id===e.to); if(!f||!t) return;
+    const path=document.createElementNS('http://www.w3.org/2000/svg','path');
+    const mx=(f.x+t.x)/2;
+    path.setAttribute('d',`M${f.x},${f.y} C${mx},${f.y} ${mx},${t.y} ${t.x},${t.y}`);
+    path.setAttribute('fill','none');
+    path.setAttribute('stroke',palOf(t).main);
+    path.setAttribute('stroke-width','2');
+    path.setAttribute('stroke-opacity','0.4');
+    document.getElementById('edges').appendChild(path);
+  });
+
+  nodes.forEach(node=>{
+    const isRoot=parentOf(node.id)===null;
+    const isSel=node.id===selectedId;
+    const isEd=node.id===editingId;
+    const pal=palOf(node);
+    const w=nodeWidth(node.label,isRoot), fs=isRoot?14:13;
+
+    const g=document.createElementNS('http://www.w3.org/2000/svg','g');
+    g.style.cursor='pointer';
+
+    const rect=document.createElementNS('http://www.w3.org/2000/svg','rect');
+    rect.setAttribute('x',node.x-w/2); rect.setAttribute('y',node.y-nodeH/2);
+    rect.setAttribute('width',w); rect.setAttribute('height',nodeH);
+    rect.setAttribute('rx',isRoot?17:8);
+    rect.setAttribute('fill',isEd?'transparent':(isRoot?pal.main:pal.light));
+    rect.setAttribute('stroke',isSel?pal.main:(isRoot?'none':pal.main));
+    rect.setAttribute('stroke-width',isSel?'2.5':'1');
+    rect.setAttribute('stroke-opacity',isSel?'1':'0.3');
+    g.appendChild(rect);
+
+    if(!isEd){
+      const txt=document.createElementNS('http://www.w3.org/2000/svg','text');
+      txt.setAttribute('x',node.x); txt.setAttribute('y',node.y+5);
+      txt.setAttribute('text-anchor','middle');
+      txt.setAttribute('font-size',fs); txt.setAttribute('font-weight','500');
+      txt.setAttribute('fill',isRoot?'#fff':pal.main);
+      txt.setAttribute('pointer-events','none');
+      txt.textContent=node.label;
+      g.appendChild(txt);
+    }
+
+    g.addEventListener('mousedown', ev=>{
+      ev.stopPropagation();
+      if(editingId&&editingId!==node.id){stopEdit(false);return;}
+      if(colorPickerOpen&&selectedId!==node.id) closeColorPicker();
+      selectedId=node.id; render(); updateSwatchActive();
+      const sx=ev.clientX,sy=ev.clientY,ox=node.x,oy=node.y;
+      const onMove=mv=>{
+        const dx=(mv.clientX-sx)/scale,dy=(mv.clientY-sy)/scale;
+        node.x=ox+dx; node.y=oy+dy; render();
+        if(editingId===node.id){
+          const w2=nodeWidth(node.label,isRoot)*scale;
+          const sp2=svgToScreen(node.x,node.y);
+          const ar=document.getElementById('app').getBoundingClientRect();
+          overlay.style.left=(sp2.x-w2/2-ar.left)+'px';
+          overlay.style.top=(sp2.y-nodeH*scale/2-ar.top)+'px';
+        }
+        if(colorPickerOpen) openColorPicker();
+      };
+      const onUp=()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
+      document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp);
+    });
+    g.addEventListener('dblclick', ev=>{ev.stopPropagation();startEdit(node.id);});
+    document.getElementById('nodes').appendChild(g);
+  });
+}
+
+document.getElementById('btn-add-child').onclick   = ()=>{ if(selectedId) addChild(selectedId); };
+document.getElementById('btn-add-sibling').onclick = ()=>{ if(selectedId) addSibling(selectedId); };
+document.getElementById('btn-color').onclick       = ()=>{ if(selectedId) toggleColorPicker(); };
+document.getElementById('btn-delete').onclick      = ()=>{ if(selectedId&&parentOf(selectedId)!==null) deleteNode(selectedId); };
+document.getElementById('btn-reset').onclick       = init;
+
+document.addEventListener('keydown', ev=>{
+  if(editingId) return;
+  if(ev.key==='Tab')   {ev.preventDefault();if(selectedId) addChild(selectedId);}
+  if(ev.key==='Enter') {ev.preventDefault();if(selectedId) addSibling(selectedId);}
+  if(ev.key==='Delete'||ev.key==='Backspace'){if(selectedId&&parentOf(selectedId)!==null) deleteNode(selectedId);}
+  if(ev.key==='F2')    {if(selectedId) startEdit(selectedId);}
+  if(ev.key==='Escape'){stopEdit(true);closeColorPicker();}
+  if(ev.key==='c'||ev.key==='C'){if(selectedId) toggleColorPicker();}
+});
+
+svg.addEventListener('mousedown', ev=>{
+  if(ev.target===svg){
+    if(editingId){stopEdit(false);return;}
+    closeColorPicker(); selectedId=null; render();
+    const sx=ev.clientX,sy=ev.clientY,ox=offset.x,oy=offset.y;
+    const onMove=mv=>{offset.x=ox+mv.clientX-sx;offset.y=oy+mv.clientY-sy;render();};
+    const onUp=()=>{document.removeEventListener('mousemove',onMove);document.removeEventListener('mouseup',onUp);};
+    document.addEventListener('mousemove',onMove); document.addEventListener('mouseup',onUp);
+  }
+});
+svg.addEventListener('wheel', ev=>{
+  ev.preventDefault();
+  scale=Math.min(2.5,Math.max(0.3,scale*(ev.deltaY>0?0.9:1.1)));
+  render();
+  if(editingId) startEdit(editingId);
+  if(colorPickerOpen) openColorPicker();
+},{passive:false});
+
+init();
+</script>
+</body>
+</html>
